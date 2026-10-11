@@ -9,14 +9,14 @@
 // float-reciprocal kernel for the u128 top block), plain SSE2, and a scalar
 // SWAR fallback.
 
-#include "zmij.h"
-
 #include <assert.h>  // assert
 #include <stddef.h>  // offsetof
 #include <stdint.h>  // uint64_t
 #include <string.h>  // memcpy
 
 #include <type_traits>  // std::make_unsigned, std::conditional_t
+
+#include "zmij.h"
 
 #if ZMIJ_USE_NEON
 #  include <arm_neon.h>
@@ -144,7 +144,8 @@ constexpr auto umul128_hi64(uint64_t x, uint64_t y) noexcept -> uint64_t {
 // Converts value in the range [0, 100) to a string. GCC generates a bit better
 // code when value is pointer-size (https://www.godbolt.org/z/5fEPMT1cc).
 // Unused under ZMIJ_USE_U64_LANE_CHAIN.
-[[ZMIJ_MAYBE_UNUSED]] inline auto digits2(size_t value) noexcept -> const char* {
+[[ZMIJ_MAYBE_UNUSED]] inline auto digits2(size_t value) noexcept -> const
+    char* {
   // Align data since unaligned access may be slower when crossing a
   // hardware-specific boundary.
   alignas(2) static const char data[] =
@@ -248,8 +249,8 @@ struct u64_lane_tables {
   // By digit count: the body's offset, the head digits max(c - 16, 0).
   uint8_t body_off[21] = {};
   constexpr u64_lane_tables() {
-    constexpr uint8_t print_order[16] = {3, 2, 1, 0,  11, 10, 9,  8,
-                                         7, 6, 5, 4,  15, 14, 13, 12};
+    constexpr uint8_t print_order[16] = {3, 2, 1, 0, 11, 10, 9,  8,
+                                         7, 6, 5, 4, 15, 14, 13, 12};
     for (int c = 0; c <= 20; ++c) {
       body_off[c] = uint8_t(c > 16 ? c - 16 : 0);
       int w = c < 16 ? 16 - c : 0;
@@ -268,7 +269,8 @@ struct u64_lane_tables {
 // is the digit count of 2^(b+1) - 1 and the correction threshold is
 // 10^(estimate-1) (0 for the one-digit rows, so the correction never fires).
 #if defined(__LZCNT__) || (ZMIJ_MSC_VER && defined(__AVX2__)) || !ZMIJ_X86_64
-#  define ZMIJ_COUNT_DIGITS_BSR 0  // hardware returns the leading-zero count as-is
+#  define ZMIJ_COUNT_DIGITS_BSR \
+    0  // hardware returns the leading-zero count as-is
 #else
 #  define ZMIJ_COUNT_DIGITS_BSR 1  // clz evaluated via bsr ^ 63
 #endif
@@ -296,13 +298,13 @@ struct count_digits_tables {
   uint64_t threshold[65] = {};
 #endif
 
-private:
+ private:
   // Table index of an entry by MSB position.
   static constexpr auto index64(int msb) noexcept -> int {
     return ZMIJ_COUNT_DIGITS_BSR ? msb : 63 - msb;
   }
 
-public:
+ public:
   // Table index for a value.
   static auto index_of(uint64_t n) noexcept -> uint64_t {
 #if ZMIJ_COUNT_DIGITS_BSR
@@ -328,7 +330,7 @@ public:
 #endif
     for (int b = 0; b < 64; ++b) {
       uint64_t max_val = (uint64_t(2) << b) - 1;  // b == 63 wraps to ~0
-      int t = 1;  // digit count of max_val
+      int t = 1;                                  // digit count of max_val
       while (t < 20 && max_val >= p10[t]) ++t;
       estimate[index64(b)] = uint8_t(t);
 #if !ZMIJ_USE_NEON
@@ -462,19 +464,18 @@ struct data {
   // leading zeros, and the 0x80 run zeroes the positions past the last digit.
   // Offset 0 is a pure reversal. SSE2 left-aligns by the scale10 pre-scale.
   alignas(32) unsigned char revalign_shuffle[32] = {
-      15,   14,   13,   12,   11,   10,   9,    8,    7,    6,
-      5,    4,    3,    2,    1,    0,    0x80, 0x80, 0x80, 0x80,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
-      0x80, 0x80};
+      15,   14,   13,   12,   11,   10,   9,    8,    7,    6,    5,
+      4,    3,    2,    1,    0,    0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
 #endif
 #if ZMIJ_USE_SSE4_1
   // Like revalign_shuffle, but for itoa_body10's lane layout (lane0 = mid
   // 4 digits, lane1 = top 4, lane2 = bottom 2): indexing at 10 - len drops
   // the leading zeros and emits the ten digits MSB-first in one pshufb.
   alignas(32) unsigned char revalign_shuffle10[26] = {
-      7,    6,    5,    4,    3,    2,    1,    0,    9,    8,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+      7,    6,    5,    4,    3,    2,    1,    0,    9,
+      8,    0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
 #  if ZMIJ_USE_AVX2
   // Sliding reversal window for itoa_body_head16_pad's 256-bit head+tail pass.
   // The base [7..0, 15..8] is the per-8-byte-half reversal to_ascii16x2_256
@@ -484,10 +485,9 @@ struct data {
   // (hlen in [3, 16]; the [2^63, 2^64) corner has a 3-digit head), so the max
   // read at offset 13 + 16 stays inside the 32 bytes.
   alignas(32) unsigned char mixed_align_shuffle[32] = {
-      7,    6,    5,    4,    3,    2,    1,    0,
-      15,   14,   13,   12,   11,   10,   9,    8,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+      7,    6,    5,    4,    3,    2,    1,    0,    15,   14,   13,
+      12,   11,   10,   9,    8,    0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
+      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
 #  endif  // ZMIJ_USE_AVX2
 #  if ZMIJ_USE_FMA
   // Sliding gather+trim for itoa_top8. The base picks the 8 top-block
@@ -497,9 +497,8 @@ struct data {
   // significant digits emit zero (not stored). Offset <= 7, so the 16-byte read
   // at offset 7 stays inside the 24 bytes.
   alignas(32) unsigned char top8_shuffle[24] = {
-      13,   12,   9,    8,    5,    4,    1,    0,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80,
-      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+      13,   12,   9,    8,    5,    4,    1,    0,    0x80, 0x80, 0x80, 0x80,
+      0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
   // Float constants for the reciprocal digit kernels, kept in the table so they
   // load as disp(base) off the shared data pointer like the integer constants.
   alignas(16) float top8_recip[4] = {1e0f, 1e-2f, 1e-4f, 1e-6f};  // itoa_top8
@@ -740,19 +739,19 @@ struct divmod_1e16_result {
 ZMIJ_INLINE auto divmod_1e16(uint128_t n,
                              [[ZMIJ_MAYBE_UNUSED]] const data& d) noexcept
     -> divmod_1e16_result {
-#if ZMIJ_USE_NEON
+#  if ZMIJ_USE_NEON
   // The constants come from static_data (see u128_consts); materializing
   // them costs mov + 3 movk apiece.
   const uint128_t magic =
       (uint128_t(d.u128_consts[0]) << 64) | d.u128_consts[1];
   uint128_t q = mulhi128(n, magic) >> 51;
   return {q, uint64_t(n - q * d.u128_consts[3])};
-#else
+#  else
   const uint128_t magic =
       (uint128_t(0x39a5652fb1137856ull) << 64) | 0xd30baf9a1e626a6dull;
   uint128_t q = mulhi128(n, magic) >> 51;
   return {q, uint64_t(n - q * uint64_t(1e16))};
-#endif
+#  endif
 }
 
 // Divmod by 1e16 for the second peel: n = value / 1e16 < 2**75, so with
@@ -767,19 +766,19 @@ struct divmod_1e16_narrow_result {
 ZMIJ_INLINE auto divmod_1e16_narrow(
     uint128_t n, [[ZMIJ_MAYBE_UNUSED]] const data& d) noexcept
     -> divmod_1e16_narrow_result {
-#if ZMIJ_USE_NEON
+#  if ZMIJ_USE_NEON
   uint32_t q =
       uint32_t(umul128_hi64(uint64_t(n >> 16), d.u128_consts[2]) >> 32);
   // Remainder is evaluated mod 2**64; quot is <= 7 digits, so uint32_t holds
   // it and every consumer gets the cheaper 32-bit count_digits.
   return {q, uint64_t(n) - q * d.u128_consts[3]};
-#else
+#  else
   constexpr uint64_t div5p16_sig = 0x734aca5f6226f0b;  // ceil(2**96 / 5**16)
   uint32_t q = uint32_t(umul128_hi64(uint64_t(n >> 16), div5p16_sig) >> 32);
   // Remainder is evaluated mod 2**64; quot is <= 7 digits, so uint32_t holds
   // it and every consumer gets the cheaper 32-bit count_digits.
   return {q, uint64_t(n) - q * uint64_t(1e16)};
-#endif
+#  endif
 }
 #endif  // ZMIJ_USE_INT128
 
@@ -889,9 +888,8 @@ ZMIJ_INLINE auto to_ascii16_lanes_and_shuffle(uint32_t hi, uint32_t lo,
 
 ZMIJ_INLINE auto to_ascii16_and_shuffle(uint64_t value, const __m128i& shuffle,
                                         const data& d) noexcept -> __m128i {
-  return to_ascii16_lanes_and_shuffle(uint32_t(value / 100'000'000),
-                                      uint32_t(value % 100'000'000), shuffle,
-                                      d);
+  return to_ascii16_lanes_and_shuffle(
+      uint32_t(value / 100'000'000), uint32_t(value % 100'000'000), shuffle, d);
 }
 
 // Unused where the u64 path is the lane chain and the u128 paths use
@@ -910,8 +908,7 @@ ZMIJ_INLINE auto to_ascii16_and_shuffle(uint64_t value, const __m128i& shuffle,
 
 ZMIJ_INLINE char* itoa_body10(char* out, uint32_t value, uint64_t len,
                               const data& d) noexcept {
-  __m128i shuffle =
-      _mm_loadu_si128(m128ptr(d.revalign_shuffle10 + (10 - len)));
+  __m128i shuffle = _mm_loadu_si128(m128ptr(d.revalign_shuffle10 + (10 - len)));
   uint32_t high8 = value / 100;
   uint32_t top4 = value / 1'000'000;
   uint32_t low2 = value - high8 * 100;
@@ -926,8 +923,9 @@ ZMIJ_INLINE char* itoa_body10(char* out, uint32_t value, uint64_t len,
 // Write value in [0, 1e16) as ASCII at out, zero-padded.
 // This is a mid/low 16-digit chunk of a u128. Unused under AVX2, which fuses
 // the padded chunks into 256-bit passes.
-[[ZMIJ_MAYBE_UNUSED]] ZMIJ_INLINE void itoa_body16_pad(
-    char* out, uint64_t value, const data& d) noexcept {
+[[ZMIJ_MAYBE_UNUSED]] ZMIJ_INLINE void itoa_body16_pad(char* out,
+                                                       uint64_t value,
+                                                       const data& d) noexcept {
   __m128i shuffle = _mm_load_si128(m128ptr(&d.bswap));
 
   __m128i ascii = to_ascii16_and_shuffle(value, shuffle, d);
@@ -962,9 +960,8 @@ ZMIJ_INLINE auto to_ascii16x2_256(uint64_t a, uint64_t b,
   const __m256i neg10 = bcastq256(&d.neg10);
   const __m256i zeros = bcastq256(&d.zeros);
   __m256i y = _mm256_add_epi64(
-      x,
-      _mm256_mul_epu32(
-          neg10k, _mm256_srli_epi64(_mm256_mul_epu32(x, div10k), div10k_exp)));
+      x, _mm256_mul_epu32(neg10k, _mm256_srli_epi64(_mm256_mul_epu32(x, div10k),
+                                                    div10k_exp)));
   __m256i z = _mm256_add_epi64(
       y, _mm256_mullo_epi32(
              neg100, _mm256_srli_epi32(_mm256_mulhi_epu16(y, div100), 3)));
@@ -981,7 +978,8 @@ ZMIJ_INLINE auto to_ascii16x2_256(uint64_t a, uint64_t b,
 // benefits (gcc gains ~1-2.5%, clang unchanged).
 static void itoa_body32_pad(char* out, uint64_t mid, uint64_t low,
                             const data& d) noexcept {
-  __m256i ascii_bcd = to_ascii16x2_256(mid, low, d);  // lane0 = mid, lane1 = low
+  __m256i ascii_bcd =
+      to_ascii16x2_256(mid, low, d);  // lane0 = mid, lane1 = low
   __m256i shuffle = _mm256_broadcastsi128_si256(
       _mm_load_si128(m128ptr(d.mixed_align_shuffle)));
   __m256i ascii = _mm256_shuffle_epi8(ascii_bcd, shuffle);
@@ -996,7 +994,8 @@ static void itoa_body32_pad(char* out, uint64_t mid, uint64_t low,
 // concatenate without any lane-crossing shuffle. Returns out + hlen + 16.
 ZMIJ_INLINE char* itoa_body_head16_pad(char* out, uint64_t head, uint64_t hlen,
                                        uint64_t tail, const data& d) noexcept {
-  __m256i ascii_bcd = to_ascii16x2_256(head, tail, d);  // lane0=head, lane1=tail
+  __m256i ascii_bcd =
+      to_ascii16x2_256(head, tail, d);  // lane0=head, lane1=tail
   // lane0 (head): sliding window at offset lz = 16 - hlen; lane1 (tail): the
   // fixed reversal at offset 0. Both come from the one mixed_align_shuffle
   // array.
@@ -1016,8 +1015,7 @@ ZMIJ_INLINE char* itoa_body_head16_pad(char* out, uint64_t head, uint64_t hlen,
 
 // Builds the 16 first ASCII digits of `value` in [0, 1e16), right-aligned
 // and zero-padded.
-ZMIJ_INLINE auto to_ascii16(uint64_t value, const data& d) noexcept
-    -> __m128i {
+ZMIJ_INLINE auto to_ascii16(uint64_t value, const data& d) noexcept -> __m128i {
   uint32_t hi = uint32_t(value / 100'000'000);
   uint32_t lo = uint32_t(value % 100'000'000);
   const __m128i div10k = _mm_load_si128(m128ptr(&d.div10k));
@@ -1110,8 +1108,7 @@ ZMIJ_INLINE char* itoa_top8(char* out, uint32_t top, uint64_t len,
   // One pshufb both gathers the 8 digits MSD-first and drops the (8 - len)
   // leading zeros, via the sliding top8_shuffle window.
   __m128i sh = _mm_loadu_si128(m128ptr(d.top8_shuffle + (8 - len)));
-  _mm_storel_epi64(reinterpret_cast<__m128i*>(out),
-                   _mm_shuffle_epi8(digs, sh));
+  _mm_storel_epi64(reinterpret_cast<__m128i*>(out), _mm_shuffle_epi8(digs, sh));
   return out + len;
 }
 #endif  // ZMIJ_USE_FMA
@@ -1123,14 +1120,14 @@ ZMIJ_INLINE char* itoa_top8(char* out, uint32_t top, uint64_t len,
 // chunks are fixed-width; only the top trims leading zeros.
 //
 // gcc and clang need some handholding. ZMIJ_NOINLINE here on SSE2 and on
-// NEON's itoa_body32_pad, with ZMIJ_UNLIKELY in itoa_signed, turned out to be
+// NEON's itoa_body32_pad, with ZMIJ_LIKELY in itoa_signed, turned out to be
 // the best compromise with neither compiler regressing >10% on some
 // benchmarks.
-#if ZMIJ_USE_SSE && !ZMIJ_USE_SSE4_1
+#  if ZMIJ_USE_SSE && !ZMIJ_USE_SSE4_1
 ZMIJ_NOINLINE
-#else
+#  else
 ZMIJ_INLINE
-#endif
+#  endif
 auto itoa_u128_wide(char* out, uint128_t value) noexcept -> char* {
   const auto* d = &static_data;
   ZMIJ_ASM(("" : "+r"(d)));  // Load constants from memory.
@@ -1172,46 +1169,47 @@ auto itoa_u128_wide(char* out, uint128_t value) noexcept -> char* {
     copy_bytes(out, buf + 40 - len, 40);
     return out + len;
   }
-#if ZMIJ_USE_SSE || ZMIJ_USE_NEON
+#  if ZMIJ_USE_SSE || ZMIJ_USE_NEON
   divmod_1e16_result lo = divmod_1e16(value, *d);  // lo.rem = digits [0, 16)
-#if ZMIJ_USE_NEON
+#    if ZMIJ_USE_NEON
   // Same 1e16 the divmod just loaded, so the compare reuses the register.
   uint64_t ten16 = d->u128_consts[3];
-#else
+#    else
   uint64_t ten16 = uint64_t(1e16);
-#endif
+#    endif
   if (lo.quot < uint128_t(ten16)) {  // 19-32 digits: top (<=16) + low
     uint64_t q = uint64_t(lo.quot);
-#if ZMIJ_USE_AVX2
+#    if ZMIJ_USE_AVX2
     // Fuse the trimmed head (q) and the fixed low chunk into one 256-bit pass,
     // then store the two lanes at out and out + len(q) (offset concatenation,
     // no lane-crossing shuffle).
     return itoa_body_head16_pad(out, q, count_digits_lt_1e16(q, *d), lo.rem,
                                 *d);
-#else
+#    else
     char* p = itoa_body(out, q, count_digits_lt_1e16(q, *d), *d);  // q < 1e16
     itoa_body16_pad(p, lo.rem, *d);
     return p + 16;
-#endif
+#    endif
   }
   // hi.rem = digits [16, 32); hi.quot = top (<= 7 digits)
   divmod_1e16_narrow_result hi = divmod_1e16_narrow(lo.quot, *d);
-#if ZMIJ_USE_FMA
+#    if ZMIJ_USE_FMA
   char* p = itoa_top8(out, hi.quot, count_digits(hi.quot, *d), *d);
-#elif ZMIJ_USE_SSE && !ZMIJ_USE_SSE4_1
+#    elif ZMIJ_USE_SSE && !ZMIJ_USE_SSE4_1
   char* p = itoa_head7(out, hi.quot, count_digits(hi.quot, *d));
-#else
+#    else
   char* p = itoa_body(out, hi.quot, count_digits(hi.quot, *d), *d);
-#endif
+#    endif
   itoa_body32_pad(p, hi.rem, lo.rem, *d);
   return p + 32;
-#endif
+#  endif
 }
 
 // A u128 holds 20-39 digits. Values <= u64 delegate to the u64 path (realistic
 // data is overwhelmingly small, so this branch is well predicted).
 ZMIJ_INLINE auto itoa_u128(char* out, uint128_t value) noexcept -> char* {
-  if (value <= UINT64_MAX) [[ZMIJ_LIKELY]] return itoa(out, uint64_t(value));
+  if (value <= UINT64_MAX) [[ZMIJ_LIKELY]]
+    return itoa(out, uint64_t(value));
   return itoa_u128_wide(out, value);
 }
 #endif  // ZMIJ_USE_INT128
@@ -1220,13 +1218,11 @@ ZMIJ_INLINE auto itoa_u128(char* out, uint128_t value) noexcept -> char* {
 // (it's not a standard integer type), so map it here. The specialization sits
 // behind ZMIJ_USE_INT128, which is 0 on toolchains without __int128 (e.g.
 // MSVC), so the primary template handles 32/64-bit there.
-template <typename Int>
-struct itoa_make_unsigned {
+template <typename Int> struct itoa_make_unsigned {
   using type = typename std::make_unsigned<Int>::type;
 };
 #if ZMIJ_USE_INT128
-template <>
-struct itoa_make_unsigned<__int128> {
+template <> struct itoa_make_unsigned<__int128> {
   using type = unsigned __int128;
 };
 #endif
@@ -1247,117 +1243,110 @@ ZMIJ_INLINE auto itoa(char* out, UInt value) noexcept -> char* {
   // Guarded like the sizeof(Int) > 8 block in itoa_signed: MSVC at /Od keeps
   // the reference to itoa_u128 in the statically-false branch, so the
   // preprocessor has to remove it where no 128-bit support exists.
-  if (sizeof(UInt) > 8) {
-    return itoa_u128(out, value);
-  } else
+  if (sizeof(UInt) > 8) return itoa_u128(out, value);
 #endif
-  {
-    uint64_t v = value;
-    const auto* d = &static_data;
-    ZMIJ_ASM(("" : "+r"(d)));  // Load constants from memory.
-    if (sizeof(UInt) <= 4) {
+  uint64_t v = value;
+  const auto* d = &static_data;
+  ZMIJ_ASM(("" : "+r"(d)));  // Load constants from memory.
+  if (sizeof(UInt) <= 4) {
 #if ZMIJ_USE_SSE4_1 || ZMIJ_USE_NEON
-      return itoa_body10(out, uint32_t(value),
-                         count_digits(uint32_t(value), *d), *d);
+    return itoa_body10(out, uint32_t(value), count_digits(uint32_t(value), *d),
+                       *d);
 #else
-      uint32_t high8 = uint32_t(value) / 100;
-      uint32_t top4 = uint32_t(value) / 1'000'000;
-      uint64_t hi = to_bcd8_split(high8, top4) + zeros;
-      uint32_t low2 = uint32_t(value) - high8 * 100;
-      uint64_t len = count_digits(uint32_t(value), *d);
-      uint64_t len_hi = len < 2 ? 0 : len - 2;  // 0..8 significant high chars
-      uint64_t sh = (8 * (8 - len_hi)) & 63;  // & 63: unused when len_hi == 0
-      uint64_t hi_aligned = is_big_endian ? hi << sh : hi >> sh;
-      copy_bytes(out, &hi_aligned, 8);  // high digits at out[0, len_hi)
-      const char* d2 = digits2(low2);
-      out[len_hi] = d2[0];
-      out[len - 1] = d2[1];  // if len == 1 overwrites d2[0]
-      return out + len;
+    uint32_t high8 = uint32_t(value) / 100;
+    uint32_t top4 = uint32_t(value) / 1'000'000;
+    uint64_t hi = to_bcd8_split(high8, top4) + zeros;
+    uint32_t low2 = uint32_t(value) - high8 * 100;
+    uint64_t len = count_digits(uint32_t(value), *d);
+    uint64_t len_hi = len < 2 ? 0 : len - 2;  // 0..8 significant high chars
+    uint64_t sh = (8 * (8 - len_hi)) & 63;    // & 63: unused when len_hi == 0
+    uint64_t hi_aligned = is_big_endian ? hi << sh : hi >> sh;
+    copy_bytes(out, &hi_aligned, 8);  // high digits at out[0, len_hi)
+    const char* d2 = digits2(low2);
+    out[len_hi] = d2[0];
+    out[len - 1] = d2[1];  // if len == 1 overwrites d2[0]
+    return out + len;
 #endif
-    } else {
-#if ZMIJ_USE_U64_LANE_CHAIN
-      // Five 4-digit groups G1..G5 on the 20-digit grid. Two products by
-      // ceil(2^90 / 1e8): v's gives q = v / 1e8 above bit 90 and G4 G5 as
-      // the fraction below; q's gives G1 above bit 90 and G2 G3 below. The
-      // top 32 fraction bits, rounded up, feed one lane each: eight digits
-      // from a 32-bit fraction allow 42.9 units of 2^-32 of error and get
-      // under 2. Two pmuludq by 10^4 then expose a group per lane per step
-      // in the high dword, the low dword being the next fraction already in
-      // place. The count is consumed only at the end, by the window shuffle
-      // and the store offset, so the first product starts from v at once.
-      uint64_t c = count_digits(v, *d);
-      uint128_t p1 = uint128_t(v) * d->u64_lane.mul90;
-      uint64_t q = uint64_t(p1 >> 90);  // v / 1e8, < 1.85e11
-      uint32_t f_b = uint32_t(p1 >> 58) + 1;  // digits 13..20
-      uint128_t p2 = uint128_t(q) * d->u64_lane.mul90;
-      uint64_t g1 = uint64_t(p2 >> 90);  // digits 1..4, <= 1844
-      uint32_t f_a = uint32_t(p2 >> 58) + 1;  // digits 5..12
-
-      const __m128i k1e4 = _mm_load_si128(m128ptr(&d->u64_lane.k1e4));
-      __m128i x = _mm_set_epi64x(int64_t(f_b), int64_t(f_a));  // lane 0 a
-      __m128i s1 = _mm_mul_epu32(x, k1e4);   // G2 | G4 in the high dwords
-      __m128i s2 = _mm_mul_epu32(s1, k1e4);  // G3 | G5
-      __m128i g = _mm_castps_si128(_mm_shuffle_ps(
-          _mm_castsi128_ps(s1), _mm_castsi128_ps(s2), _MM_SHUFFLE(3, 1, 3, 1)));
-      __m128i ascii = to_ascii_4x4(g, *d);  // [G2 G4 G3 G5], reversed within
-      // The head is G1's four digits, left-aligned at out; the window
-      // shuffle puts digits 5..20 in print order, left-aligned for c <= 16,
-      // stored over the head's unused bytes at out + (c - 16 or 0), the
-      // offset from a byte table by count.
-      __m128i window = _mm_loadu_si128(m128ptr(d->u64_lane.window[c]));
-      write_head4(out, g1, c, *d);
-      _mm_storeu_si128(
-          reinterpret_cast<__m128i*>(out + d->u64_lane.body_off[c]),
-          _mm_shuffle_epi8(ascii, window));
-      return out + c;
-#elif ZMIJ_USE_SSE || ZMIJ_USE_NEON
-      // We peel off the last four digits and always write them at the end,
-      // but if the number is below 1e16 we don't move them around but instead
-      // fill them into the SIMD kernel.  This benchmarked fastest out of
-      // the variations that I tried.
-#  if ZMIJ_USE_NEON
-      // The big constants (the /1e4 umulh reciprocal, the 1e16 - 1 threshold
-      // and the tail's /100 pair) load from static_data ldp pairs; letting
-      // the compiler materialize them costs seven mov/movk and, measured on
-      // the M5, ~a cycle per call.
-      uint64_t high = umul128_hi64(v, d->u64toa_consts[0]) >> 11;
-      uint64_t big = v > d->u64toa_consts[1];
-#  else
-      uint64_t high = v / 10000;
-      uint64_t big = v >= uint64_t(1e16);
-#  endif
-      uint32_t low4 = uint32_t(v - high * 10000);
-      uint64_t body = big ? high : v;  // body < 1e16 either way
-      char* p = itoa_body(out, body, count_digits_lt_1e16(body, *d), *d);
-      uint64_t t =
-          uint64_t(low4) * (ZMIJ_USE_NEON ? d->frac_mul : frac_tail_mul);
-      copy_bytes(p, digits2(t >> 32), 2);
-      copy_bytes(p + 2, d->frac100.e[uint32_t(t) >> 25], 2);
-      // The trailing digits only count if they aren't redundant.
-      return p + 4 * big;
-#else
-      // u64: at most 20 digits -> three groups (top, mid 8, low 8). The top
-      // group is v / 1e16 in [0, 1844], at most 4 digits, so divmod100 + two
-      // digits2 lookups beat a full to_bcd8. Right-aligned, those 4 bytes land
-      // at buf[4..8) -- where the len==20 read window (buf + 24 - len) begins.
-      char buf[48] = {};
-      uint64_t q = v / 100'000'000ull;
-      uint32_t top = uint32_t(v / uint64_t(1e16));  // <= 1844
-      uint64_t lo = to_bcd8(uint32_t(v - q * 100'000'000ull)) + zeros;
-      uint64_t mid = to_bcd8(uint32_t(q - top * 100'000'000ull)) + zeros;
-      // One product: top / 100 (at most 18) above bit 32, the remainder's
-      // pair under the fraction's top 7 bits.
-      uint64_t t = uint64_t(top) * frac_tail_mul;
-      copy_bytes(buf + 4, digits2(t >> 32), 2);
-      copy_bytes(buf + 6, d->frac100.e[uint32_t(t) >> 25], 2);
-      copy_bytes(buf + 8, &mid, 8);
-      copy_bytes(buf + 16, &lo, 8);
-      uint64_t len = count_digits(v, *d);
-      copy_bytes(out, buf + 24 - len, 20);
-      return out + len;
-#endif  // ZMIJ_USE_U64_LANE_CHAIN
-    }
   }
+#if ZMIJ_USE_U64_LANE_CHAIN
+  // Five 4-digit groups G1..G5 on the 20-digit grid. Two products by
+  // ceil(2^90 / 1e8): v's gives q = v / 1e8 above bit 90 and G4 G5 as
+  // the fraction below; q's gives G1 above bit 90 and G2 G3 below. The
+  // top 32 fraction bits, rounded up, feed one lane each: eight digits
+  // from a 32-bit fraction allow 42.9 units of 2^-32 of error and get
+  // under 2. Two pmuludq by 10^4 then expose a group per lane per step
+  // in the high dword, the low dword being the next fraction already in
+  // place. The count is consumed only at the end, by the window shuffle
+  // and the store offset, so the first product starts from v at once.
+  uint64_t c = count_digits(v, *d);
+  uint128_t p1 = uint128_t(v) * d->u64_lane.mul90;
+  uint64_t q = uint64_t(p1 >> 90);        // v / 1e8, < 1.85e11
+  uint32_t f_b = uint32_t(p1 >> 58) + 1;  // digits 13..20
+  uint128_t p2 = uint128_t(q) * d->u64_lane.mul90;
+  uint64_t g1 = uint64_t(p2 >> 90);       // digits 1..4, <= 1844
+  uint32_t f_a = uint32_t(p2 >> 58) + 1;  // digits 5..12
+
+  const __m128i k1e4 = _mm_load_si128(m128ptr(&d->u64_lane.k1e4));
+  __m128i x = _mm_set_epi64x(int64_t(f_b), int64_t(f_a));  // lane 0 a
+  __m128i s1 = _mm_mul_epu32(x, k1e4);   // G2 | G4 in the high dwords
+  __m128i s2 = _mm_mul_epu32(s1, k1e4);  // G3 | G5
+  __m128i g = _mm_castps_si128(_mm_shuffle_ps(
+      _mm_castsi128_ps(s1), _mm_castsi128_ps(s2), _MM_SHUFFLE(3, 1, 3, 1)));
+  __m128i ascii = to_ascii_4x4(g, *d);  // [G2 G4 G3 G5], reversed within
+  // The head is G1's four digits, left-aligned at out; the window
+  // shuffle puts digits 5..20 in print order, left-aligned for c <= 16,
+  // stored over the head's unused bytes at out + (c - 16 or 0), the
+  // offset from a byte table by count.
+  __m128i window = _mm_loadu_si128(m128ptr(d->u64_lane.window[c]));
+  write_head4(out, g1, c, *d);
+  _mm_storeu_si128(reinterpret_cast<__m128i*>(out + d->u64_lane.body_off[c]),
+                   _mm_shuffle_epi8(ascii, window));
+  return out + c;
+#elif ZMIJ_USE_SSE || ZMIJ_USE_NEON
+  // We peel off the last four digits and always write them at the end,
+  // but if the number is below 1e16 we don't move them around but instead
+  // fill them into the SIMD kernel.  This benchmarked fastest out of
+  // the variations that I tried.
+#  if ZMIJ_USE_NEON
+  // The big constants (the /1e4 umulh reciprocal, the 1e16 - 1 threshold
+  // and the tail's /100 pair) load from static_data ldp pairs; letting
+  // the compiler materialize them costs seven mov/movk and, measured on
+  // the M5, ~a cycle per call.
+  uint64_t high = umul128_hi64(v, d->u64toa_consts[0]) >> 11;
+  uint64_t big = v > d->u64toa_consts[1];
+#  else
+  uint64_t high = v / 10000;
+  uint64_t big = v >= uint64_t(1e16);
+#  endif
+  uint32_t low4 = uint32_t(v - high * 10000);
+  uint64_t body = big ? high : v;  // body < 1e16 either way
+  char* p = itoa_body(out, body, count_digits_lt_1e16(body, *d), *d);
+  uint64_t t = uint64_t(low4) * (ZMIJ_USE_NEON ? d->frac_mul : frac_tail_mul);
+  copy_bytes(p, digits2(t >> 32), 2);
+  copy_bytes(p + 2, d->frac100.e[uint32_t(t) >> 25], 2);
+  // The trailing digits only count if they aren't redundant.
+  return p + 4 * big;
+#else
+  // u64: at most 20 digits -> three groups (top, mid 8, low 8). The top
+  // group is v / 1e16 in [0, 1844], at most 4 digits, so divmod100 + two
+  // digits2 lookups beat a full to_bcd8. Right-aligned, those 4 bytes land
+  // at buf[4..8) -- where the len==20 read window (buf + 24 - len) begins.
+  char buf[48] = {};
+  uint64_t q = v / 100'000'000ull;
+  uint32_t top = uint32_t(v / uint64_t(1e16));  // <= 1844
+  uint64_t lo = to_bcd8(uint32_t(v - q * 100'000'000ull)) + zeros;
+  uint64_t mid = to_bcd8(uint32_t(q - top * 100'000'000ull)) + zeros;
+  // One product: top / 100 (at most 18) above bit 32, the remainder's
+  // pair under the fraction's top 7 bits.
+  uint64_t t = uint64_t(top) * frac_tail_mul;
+  copy_bytes(buf + 4, digits2(t >> 32), 2);
+  copy_bytes(buf + 6, d->frac100.e[uint32_t(t) >> 25], 2);
+  copy_bytes(buf + 8, &mid, 8);
+  copy_bytes(buf + 16, &lo, 8);
+  uint64_t len = count_digits(v, *d);
+  copy_bytes(out, buf + 24 - len, 20);
+  return out + len;
+#endif  // ZMIJ_USE_U64_LANE_CHAIN
 }
 
 // Write the decimal representation of signed value.
@@ -1370,15 +1359,13 @@ ZMIJ_INLINE auto itoa_signed(char* out, Int value) noexcept -> char* {
   // If possible, use the 64bit path.  The 128x128 multiplications required for
   // the full width are more expensive than branching.
   if (sizeof(Int) > 8) {
-    if (value == Int(int64_t(value))) [[ZMIJ_LIKELY]] {
+    if (value == Int(int64_t(value))) [[ZMIJ_LIKELY]]
       return itoa_signed(out, int64_t(value));
-    } else [[ZMIJ_UNLIKELY]] {
-      using UInt = typename itoa_make_unsigned<Int>::type;
-      UInt mag = value < 0 ? -UInt(value) : UInt(value);
-      *out = '-';
-      out += value < 0;
-      return itoa_u128_wide(out, mag);
-    }
+    using UInt = typename itoa_make_unsigned<Int>::type;
+    UInt mag = value < 0 ? -UInt(value) : UInt(value);
+    *out = '-';
+    out += value < 0;
+    return itoa_u128_wide(out, mag);
   }
 #endif
   using UInt = typename itoa_make_unsigned<Int>::type;
