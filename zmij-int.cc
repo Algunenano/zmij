@@ -24,6 +24,30 @@
 #  include <immintrin.h>
 #endif
 
+// 256-bit paths for the u128 body chunks.
+#ifdef ZMIJ_USE_AVX2
+// Use the provided definition.
+static_assert(!ZMIJ_USE_AVX2 || ZMIJ_USE_SSE4_1, "AVX2 requires SSE4.1");
+#elif defined(__AVX2__)
+#  define ZMIJ_USE_AVX2 ZMIJ_USE_SSE4_1
+#else
+#  define ZMIJ_USE_AVX2 0
+#endif
+
+// Fused multiply-add, for the float-reciprocal digit kernels.  This is
+// a microarchtiecture level 3 feature, and usually comes paired with AVX2.
+// MSVC has no __FMA__, but /arch:AVX2 implies FMA there; clang-cl defines
+// __FMA__ when FMA is on, so it takes the first branch.
+#ifdef ZMIJ_USE_FMA
+// Use the provided definition.
+static_assert(!ZMIJ_USE_FMA || ZMIJ_USE_SSE4_1, "FMA requires SSE4.1");
+#elif defined(__FMA__) || \
+    (defined(_MSC_VER) && !defined(__clang__) && defined(__AVX2__))
+#  define ZMIJ_USE_FMA ZMIJ_USE_SSE4_1
+#else
+#  define ZMIJ_USE_FMA 0
+#endif
+
 // The u64 kernel (see itoa): the 20-digit grid as five 4-digit groups from
 // two 128-bit products, two group chains running side by side in the two
 // 64-bit lanes of an XMM register. It needs SSE4.1 and a 64x64->128
@@ -48,12 +72,8 @@
 #endif
 
 namespace zmij {
-namespace details_int {
+namespace detail {
 namespace {
-
-using detail::uint128;
-using detail::uint128_t;
-using detail::umul128;
 
 // Traps unless `out` has room for `need` bytes. Skipped when the size isn't
 // known, exactly as _FORTIFY_SOURCE does.
@@ -443,7 +463,7 @@ struct data {
   uint128 div100 = splat32(div100_sig);
   uint128 div10 = splat16((1 << 16) / 10 + 1);
 #  if ZMIJ_USE_SSE4_1
-  uint128 neg100 = splat32(details_int::neg100);
+  uint128 neg100 = splat32(detail::neg100);
   uint128 neg10 = splat16((1 << 8) - 10);
   // The full 16-byte reversal, as raw memory bytes 15, 14, ..., 0. Written
   // against detail::uint128's lo-first layout: the (hi, lo) constructor takes
@@ -457,8 +477,8 @@ struct data {
   uint128 moddiv10 = splat16(10 * (1 << 8) - 1);
 #  endif  // ZMIJ_USE_SSE4_1
   uint128 div10k = splat64(div10k_sig);
-  uint128 neg10k = splat64(details_int::neg10k);
-  uint128 zeros = splat64(details_int::zeros);
+  uint128 neg10k = splat64(detail::neg10k);
+  uint128 zeros = splat64(detail::zeros);
 #  if !ZMIJ_USE_SSE4_1
   // 10^lz for lz = 16 - len in [0, 15]: scaling a len-digit value by it moves
   // the MSD into the top digit of the 16-digit field.
@@ -1500,5 +1520,5 @@ template auto itoa(char* out, uint128_t value) noexcept -> char*;
 template auto itoa_signed(char* out, __int128 value) noexcept -> char*;
 #endif
 
-}  // namespace details_int
+}  // namespace detail
 }  // namespace zmij
