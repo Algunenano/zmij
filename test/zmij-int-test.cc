@@ -39,12 +39,10 @@ template <typename T> constexpr auto max_value() -> wide_uint {
 }
 
 template <typename T> constexpr auto buffer_size() -> size_t {
-  if (sizeof(T) <= 4) {
+  if (sizeof(T) <= 4)
     return is_signed<T>() ? zmij::int32_buffer_size : zmij::uint32_buffer_size;
-  }
-  if (sizeof(T) <= 8) {
+  if (sizeof(T) <= 8)
     return is_signed<T>() ? zmij::int64_buffer_size : zmij::uint64_buffer_size;
-  }
   return is_signed<T>() ? zmij::int128_buffer_size : zmij::uint128_buffer_size;
 }
 
@@ -101,9 +99,8 @@ template <typename T> auto boundary_candidates() -> std::vector<candidate> {
     for (int d = -boundary_radius; d <= boundary_radius; ++d) {
       wide_uint delta = wide_uint(d < 0 ? -d : d);
       if ((d > 0) != negative) {  // Away from zero: the magnitude grows.
-        if (magnitude <= ~wide_uint(0) - delta) {
+        if (magnitude <= ~wide_uint(0) - delta)
           result.push_back({magnitude + delta, negative});
-        }
       } else if (delta <= magnitude) {
         result.push_back({magnitude - delta, negative});
       } else {  // Crosses zero.
@@ -122,9 +119,7 @@ template <typename T> auto boundary_candidates() -> std::vector<candidate> {
   }
   // min and max of T.
   add(max_value<T>(), false);
-  if (is_signed<T>()) {
-    add(max_value<T>() + 1, true);
-  }
+  if (is_signed<T>()) add(max_value<T>() + 1, true);
   return result;
 }
 
