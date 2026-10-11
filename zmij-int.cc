@@ -112,7 +112,8 @@ inline auto bswap64(uint64_t x) noexcept -> uint64_t {
 #endif
 }
 
-inline auto clz(uint64_t x) noexcept -> int {
+// Not every count_digits_tables::index_of variant uses this.
+[[ZMIJ_MAYBE_UNUSED]] inline auto clz(uint64_t x) noexcept -> int {
   assert(x != 0);
 #if ZMIJ_HAS_BUILTIN(__builtin_clzll)
   return __builtin_clzll(x);
@@ -138,23 +139,6 @@ inline auto clz(uint64_t x) noexcept -> int {
 
 constexpr auto umul128_hi64(uint64_t x, uint64_t y) noexcept -> uint64_t {
   return uint64_t(umul128(x, y) >> 64);
-}
-
-inline auto count_trailing_nonzeros(uint64_t x) noexcept -> int {
-  // We count the number of bytes until there are only zeros left.
-  // The code is equivalent to
-  //   return 8 - clz(x) / 8
-  // but if the BSR instruction is emitted (as gcc on x64 does with
-  // default settings), subtracting the constant before dividing allows
-  // the compiler to combine it with the subtraction which it inserts
-  // due to BSR counting in the opposite direction.
-  //
-  // Additionally, the BSR instruction requires a zero check.  Since the
-  // high bit is unused we can avoid the zero check by shifting the
-  // datum left by one and inserting a sentinel bit at the end. This can
-  // be faster than the automatically inserted range check.
-  if (is_big_endian) x = bswap64(x);
-  return (size_t(70) - clz((x << 1) | 1)) / 8;  // size_t for native arithmetic
 }
 
 // Converts value in the range [0, 100) to a string. GCC generates a bit better
@@ -655,17 +639,13 @@ ZMIJ_INLINE auto to_bcd_4x4(__m128i y, const data& d) noexcept -> __m128i {
 
 #endif  // ZMIJ_USE_SSE
 
-struct bcd_result {
-  uint64_t bcd;
-  int len;
-};
-
-// to_bcd8 with the base-10000 quotient abcd = abcdefgh / 10000 supplied by the
-// caller, so callers that can compute it off the critical path (e.g. the u32
-// fallback, where it equals value / 1e6, available in parallel with
-// value / 100) skip the chained divide.
+// Converts abcdefgh < 1e8 to eight BCD digits, most significant first in
+// memory, given its base-10000 quotient abcd = abcdefgh / 10000. Callers that
+// can compute abcd off the critical path (e.g. the u32 fallback, where it
+// equals value / 1e6, available in parallel with value / 100) skip the
+// chained divide.
 ZMIJ_INLINE auto to_bcd8_split(uint32_t abcdefgh, uint32_t abcd) noexcept
-    -> bcd_result {
+    -> uint64_t {
   // SSE2 is the only SIMD tier that calls this outside the scalar u128 path.
   if (!ZMIJ_USE_SSE || ZMIJ_USE_SSE4_1) {
     // Three steps BCD. Base 10000 -> base 100 -> base 10, each step adding
@@ -677,8 +657,7 @@ ZMIJ_INLINE auto to_bcd8_split(uint32_t abcdefgh, uint32_t abcd) noexcept
     uint64_t a_b_c_d_e_f_g_h =
         ab_cd_ef_gh +
         neg10 * (((ab_cd_ef_gh * div10_sig) >> div10_exp) & 0xf000f000f000f);
-    uint64_t bcd = is_big_endian ? a_b_c_d_e_f_g_h : bswap64(a_b_c_d_e_f_g_h);
-    return {bcd, count_trailing_nonzeros(bcd)};
+    return is_big_endian ? a_b_c_d_e_f_g_h : bswap64(a_b_c_d_e_f_g_h);
   }
 #if ZMIJ_USE_SSE && !ZMIJ_USE_SSE4_1
   const auto* d = &static_data;
@@ -690,16 +669,15 @@ ZMIJ_INLINE auto to_bcd8_split(uint32_t abcdefgh, uint32_t abcd) noexcept
       (uint64_t(abcdefgh) << 32) - uint64_t((10000ull << 32) - 1) * abcd;
   __m128i v = to_bcd_4x4(_mm_set_epi64x(0, abcd_efgh), *d);
 #  if defined(__x86_64__) || defined(_M_X64)
-  uint64_t bcd = _mm_cvtsi128_si64(v);
+  return _mm_cvtsi128_si64(v);
 #  else
-  uint64_t bcd = uint64_t(_mm_cvtsi128_si32(_mm_srli_si128(v, 4))) << 32 |
-                 uint32_t(_mm_cvtsi128_si32(v));
+  return uint64_t(_mm_cvtsi128_si32(_mm_srli_si128(v, 4))) << 32 |
+         uint32_t(_mm_cvtsi128_si32(v));
 #  endif
-  return {bcd, count_trailing_nonzeros(bcd)};
 #endif
 }
 
-auto to_bcd8(uint32_t abcdefgh) noexcept -> bcd_result {
+auto to_bcd8(uint32_t abcdefgh) noexcept -> uint64_t {
   return to_bcd8_split(
       abcdefgh, uint32_t((uint64_t(abcdefgh) * div10k_sig) >> div10k_exp));
 }
@@ -1080,7 +1058,7 @@ ZMIJ_INLINE char* itoa_body(char* out, uint64_t value, uint64_t len,
 // wait on the digit count at the end of the two-divmod u128 chain. Mirrors
 // the scalar u32 path's high-group store.
 ZMIJ_INLINE char* itoa_head7(char* out, uint32_t top, uint64_t len) noexcept {
-  uint64_t bcd = to_bcd8(top).bcd + zeros;
+  uint64_t bcd = to_bcd8(top) + zeros;
   uint64_t sh = 8 * (8 - len);
   uint64_t aligned = is_big_endian ? bcd << sh : bcd >> sh;
   copy_bytes(out, &aligned, 8);
@@ -1160,8 +1138,8 @@ auto itoa_u128_wide(char* out, uint128_t value) noexcept -> char* {
     // Mirrors the SIMD paths, but we have to move in 8-digit blocks.
     bool big = value >= uint128_t(uint64_t(1e16)) * uint64_t(1e16);  // >= 1e32
     divmod_1e16_result lo = divmod_1e16(value, *d);  // lo.rem = low 16 digits
-    uint64_t low_hi = to_bcd8(uint32_t(lo.rem / 100'000'000ull)).bcd + zeros;
-    uint64_t low_lo = to_bcd8(uint32_t(lo.rem % 100'000'000ull)).bcd + zeros;
+    uint64_t low_hi = to_bcd8(uint32_t(lo.rem / 100'000'000ull)) + zeros;
+    uint64_t low_lo = to_bcd8(uint32_t(lo.rem % 100'000'000ull)) + zeros;
     // No zero-init: unwritten bytes are only ever copied into the scratch
     // region past out + len that the buffer contract already permits.
     // Digit groups end at buf + 40, so the read window buf + 40 - len starts
@@ -1171,8 +1149,8 @@ auto itoa_u128_wide(char* out, uint128_t value) noexcept -> char* {
     copy_bytes(buf + 32, &low_lo, 8);
     if (!big) {  // 19-32 digits: top (<=16) + low 16
       uint64_t top = uint64_t(lo.quot);
-      uint64_t top_hi = to_bcd8(uint32_t(top / 100'000'000ull)).bcd + zeros;
-      uint64_t top_lo = to_bcd8(uint32_t(top % 100'000'000ull)).bcd + zeros;
+      uint64_t top_hi = to_bcd8(uint32_t(top / 100'000'000ull)) + zeros;
+      uint64_t top_lo = to_bcd8(uint32_t(top % 100'000'000ull)) + zeros;
       copy_bytes(buf + 8, &top_hi, 8);
       copy_bytes(buf + 16, &top_lo, 8);
       uint64_t len = 16 + count_digits(top, *d);
@@ -1184,9 +1162,9 @@ auto itoa_u128_wide(char* out, uint128_t value) noexcept -> char* {
     uint32_t top = hi.quot;
     uint64_t mid = hi.rem;
     // top is <= 7 digits, so one to_bcd8 covers it.
-    uint64_t top_8 = to_bcd8(top).bcd + zeros;
-    uint64_t mid_hi = to_bcd8(uint32_t(mid / 100'000'000ull)).bcd + zeros;
-    uint64_t mid_lo = to_bcd8(uint32_t(mid % 100'000'000ull)).bcd + zeros;
+    uint64_t top_8 = to_bcd8(top) + zeros;
+    uint64_t mid_hi = to_bcd8(uint32_t(mid / 100'000'000ull)) + zeros;
+    uint64_t mid_lo = to_bcd8(uint32_t(mid % 100'000'000ull)) + zeros;
     copy_bytes(buf, &top_8, 8);
     copy_bytes(buf + 8, &mid_hi, 8);
     copy_bytes(buf + 16, &mid_lo, 8);
@@ -1284,7 +1262,7 @@ ZMIJ_INLINE auto itoa(char* out, UInt value) noexcept -> char* {
 #else
       uint32_t high8 = uint32_t(value) / 100;
       uint32_t top4 = uint32_t(value) / 1'000'000;
-      uint64_t hi = to_bcd8_split(high8, top4).bcd + zeros;
+      uint64_t hi = to_bcd8_split(high8, top4) + zeros;
       uint32_t low2 = uint32_t(value) - high8 * 100;
       uint64_t len = count_digits(uint32_t(value), *d);
       uint64_t len_hi = len < 2 ? 0 : len - 2;  // 0..8 significant high chars
@@ -1365,8 +1343,8 @@ ZMIJ_INLINE auto itoa(char* out, UInt value) noexcept -> char* {
       char buf[48] = {};
       uint64_t q = v / 100'000'000ull;
       uint32_t top = uint32_t(v / uint64_t(1e16));  // <= 1844
-      uint64_t lo = to_bcd8(uint32_t(v - q * 100'000'000ull)).bcd + zeros;
-      uint64_t mid = to_bcd8(uint32_t(q - top * 100'000'000ull)).bcd + zeros;
+      uint64_t lo = to_bcd8(uint32_t(v - q * 100'000'000ull)) + zeros;
+      uint64_t mid = to_bcd8(uint32_t(q - top * 100'000'000ull)) + zeros;
       // One product: top / 100 (at most 18) above bit 32, the remainder's
       // pair under the fraction's top 7 bits.
       uint64_t t = uint64_t(top) * frac_tail_mul;
