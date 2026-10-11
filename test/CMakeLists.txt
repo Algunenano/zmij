@@ -22,7 +22,7 @@ endfunction ()
 # integer-formatting tests.
 function (add_zmij_test name)
   add_zmij_api_test(${name})
-  target_sources(${name} PRIVATE zmij-impl-test.cc zmij-itoa-test.cc)
+  target_sources(${name} PRIVATE zmij-impl-test.cc zmij-int-test.cc)
 endfunction ()
 
 add_zmij_test(zmij-test)

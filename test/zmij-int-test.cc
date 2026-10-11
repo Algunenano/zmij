@@ -6,49 +6,46 @@
 // Copyright (c) 2025 - present, Victor Zverovich
 // Distributed under the MIT license (see LICENSE).
 
+#include "zmij-int.cc"
+
 #include <gtest/gtest.h>
+#include <limits.h>  // CHAR_BIT
+#include <stddef.h>  // ptrdiff_t, size_t
 #include <stdint.h>  // uint64_t
 #include <string.h>  // memset
 
-#include <limits>  // std::numeric_limits
-#include <string>  // std::string
-#include <vector>  // std::vector
+#include <string>       // std::string
+#include <type_traits>  // std::conditional
+#include <vector>       // std::vector
 
 #include "fmt/format.h"
-#include "zmij-int.cc"
 
 namespace {
 
-#if ZMIJ_USE_INT128
-using wide_uint = unsigned __int128;
-#else
-using wide_uint = uint64_t;
-#endif
+using wide_uint =
+    typename std::conditional<ZMIJ_USE_INT128, zmij::detail::uint128_t,
+                              uint64_t>::type;
 
 // std::numeric_limits and std::is_signed are unreliable for __int128 in
 // strict-conformance mode, so compute the properties directly.
-template <typename T> constexpr auto is_signed_int() -> bool {
+template <typename T> constexpr auto is_signed() -> bool {
   return T(-1) < T(0);
 }
 
-// Maximum value of T as an unsigned magnitude.
-template <typename T> constexpr auto max_magnitude() -> wide_uint {
-  return is_signed_int<T>()
-             ? (wide_uint(1) << (sizeof(T) * 8 - 1)) - 1
-             : (sizeof(T) == sizeof(wide_uint)
-                    ? ~wide_uint(0)
-                    : (wide_uint(1) << (sizeof(T) * 8 % (sizeof(wide_uint) * 8))) - 1);
+// Maximum value of T represented as wide_uint.
+template <typename T> constexpr auto max_value() -> wide_uint {
+  return ~wide_uint(0) >>
+         ((sizeof(wide_uint) - sizeof(T)) * CHAR_BIT + is_signed<T>());
 }
 
 template <typename T> constexpr auto buffer_size() -> size_t {
-  if (is_signed_int<T>()) {
-    return sizeof(T) <= 4   ? size_t(zmij::int32_buffer_size)
-           : sizeof(T) <= 8 ? size_t(zmij::int64_buffer_size)
-                            : size_t(zmij::int128_buffer_size);
+  if (sizeof(T) <= 4) {
+    return is_signed<T>() ? zmij::int32_buffer_size : zmij::uint32_buffer_size;
   }
-  return sizeof(T) <= 4   ? size_t(zmij::uint32_buffer_size)
-         : sizeof(T) <= 8 ? size_t(zmij::uint64_buffer_size)
-                          : size_t(zmij::uint128_buffer_size);
+  if (sizeof(T) <= 8) {
+    return is_signed<T>() ? zmij::int64_buffer_size : zmij::uint64_buffer_size;
+  }
+  return is_signed<T>() ? zmij::int128_buffer_size : zmij::uint128_buffer_size;
 }
 
 // Returns the offset of the first byte in [p, p + n) other than '?', or n.
@@ -61,16 +58,17 @@ auto find_clobbered(const char* p, size_t n) -> size_t {
 // Formats value with zmij::write into an exactly buffer_size<T>()-sized
 // buffer and verifies the bytes before and past it stay untouched.
 template <typename T> auto zmij_to_string(T value) -> std::string {
-  const size_t size = buffer_size<T>();
-  char storage[8 + buffer_size<T>() + 8];
+  constexpr size_t guard_size = 8;
+  constexpr size_t size = buffer_size<T>();
+  char storage[size + 2 * guard_size];
   memset(storage, '?', sizeof(storage));
-  char* buffer = storage + 8;
+  char* buffer = storage + guard_size;
   char* end = zmij::write(buffer, size, value);
-  size_t under = find_clobbered(storage, 8);
-  EXPECT_EQ(under, size_t(8))
-      << "buffer underrun at offset " << ptrdiff_t(under) - 8;
-  size_t over = find_clobbered(buffer + size, 8);
-  EXPECT_EQ(over, size_t(8)) << "buffer overrun at offset " << size + over;
+  size_t under = find_clobbered(storage, guard_size);
+  EXPECT_EQ(under, guard_size) << "buffer underrun at offset "
+                               << ptrdiff_t(under) - ptrdiff_t(guard_size);
+  size_t over = find_clobbered(buffer + size, guard_size);
+  EXPECT_EQ(over, guard_size) << "buffer overrun at offset " << size + over;
   return std::string(buffer, end);
 }
 
@@ -82,15 +80,14 @@ struct candidate {
 };
 
 template <typename T> auto in_range(candidate c) -> bool {
-  if (!c.negative || c.magnitude == 0)
-    return c.magnitude <= max_magnitude<T>();
-  return is_signed_int<T>() && c.magnitude <= max_magnitude<T>() + 1;
+  if (!c.negative || c.magnitude == 0) return c.magnitude <= max_value<T>();
+  return is_signed<T>() && c.magnitude <= max_value<T>() + 1;
 }
 
-// Converts an in-range candidate to T via two's-complement wrapping.
+// Converts an in-range candidate to T without an out-of-range signed cast.
 template <typename T> auto to_value(candidate c) -> T {
-  wide_uint bits = c.negative ? wide_uint(0) - c.magnitude : c.magnitude;
-  return T(bits);
+  if (!c.negative || c.magnitude == 0) return T(c.magnitude);
+  return T(-T(c.magnitude - 1) - 1);
 }
 
 // How far around each boundary to test.
@@ -104,17 +101,18 @@ template <typename T> auto boundary_candidates() -> std::vector<candidate> {
     for (int d = -boundary_radius; d <= boundary_radius; ++d) {
       wide_uint delta = wide_uint(d < 0 ? -d : d);
       if ((d > 0) != negative) {  // Away from zero: the magnitude grows.
-        if (magnitude <= ~wide_uint(0) - delta)
-          result.push_back(candidate{magnitude + delta, negative});
+        if (magnitude <= ~wide_uint(0) - delta) {
+          result.push_back({magnitude + delta, negative});
+        }
       } else if (delta <= magnitude) {
-        result.push_back(candidate{magnitude - delta, negative});
+        result.push_back({magnitude - delta, negative});
       } else {  // Crosses zero.
-        result.push_back(candidate{delta - magnitude, !negative});
+        result.push_back({delta - magnitude, !negative});
       }
     }
   };
   add(0, false);
-  for (int k = 0; k < int(sizeof(wide_uint)) * 8; ++k) {
+  for (int k = 0; k < int(sizeof(wide_uint)) * CHAR_BIT; ++k) {
     add(wide_uint(1) << k, false);
     add(wide_uint(1) << k, true);
   }
@@ -123,23 +121,25 @@ template <typename T> auto boundary_candidates() -> std::vector<candidate> {
     add(p, true);
   }
   // min and max of T.
-  add(max_magnitude<T>(), false);
-  add(is_signed_int<T>() ? max_magnitude<T>() + 1 : 0, is_signed_int<T>());
+  add(max_value<T>(), false);
+  if (is_signed<T>()) {
+    add(max_value<T>() + 1, true);
+  }
   return result;
 }
 
-template <typename T> class itoa_test : public ::testing::Test {};
+template <typename T> class int_test : public testing::Test {};
 
-using int_types = ::testing::Types<int8_t, uint8_t, int16_t, uint16_t, int32_t,
-                                   uint32_t, int64_t, uint64_t
+using int_types = testing::Types<int8_t, uint8_t, int16_t, uint16_t, int32_t,
+                                 uint32_t, int64_t, uint64_t
 #if ZMIJ_USE_INT128
-                                   ,
-                                   __int128, unsigned __int128
+                                 ,
+                                 __int128, unsigned __int128
 #endif
-                                   >;
-TYPED_TEST_SUITE(itoa_test, int_types);
+                                 >;
+TYPED_TEST_SUITE(int_test, int_types);
 
-TYPED_TEST(itoa_test, boundary_values) {
+TYPED_TEST(int_test, boundary_values) {
   for (candidate c : boundary_candidates<TypeParam>()) {
     if (!in_range<TypeParam>(c)) continue;
     TypeParam value = to_value<TypeParam>(c);
@@ -147,7 +147,7 @@ TYPED_TEST(itoa_test, boundary_values) {
   }
 }
 
-TEST(itoa_api_test, truncation) {
+TEST(int_api_test, truncation) {
   char buffer[4];
   char* end = zmij::write(buffer, 4, 123456);
   EXPECT_EQ(std::string(buffer, end), "1234");
