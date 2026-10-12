@@ -1348,7 +1348,7 @@ ZMIJ_INLINE auto itoa_signed(char* out, Int value) noexcept -> char* {
     return itoa_u128_wide(out, mag);
   }
 #endif
-  using UInt = std::conditional_t<sizeof(Int) <= 4, uint32_t, uint64_t>;
+  using uint = std::conditional_t<sizeof(Int) <= 4, uint32_t, uint64_t>;
 #if ZMIJ_USE_NEON
   if (sizeof(Int) <= 4) {
     const auto* d = &static_data;
@@ -1356,7 +1356,7 @@ ZMIJ_INLINE auto itoa_signed(char* out, Int value) noexcept -> char* {
     return itoa_i32(out, int32_t(value), *d);
   }
 #endif
-  UInt mag = value >= 0 ? UInt(value) : -UInt(value);
+  uint mag = value >= 0 ? uint(value) : -uint(value);
   *out = '-';
   out += value < 0;
   return itoa(out, mag);
