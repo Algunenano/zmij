@@ -198,24 +198,19 @@ constexpr auto make_frac100() -> frac100_table {
   }
   return t;
 }
-#if ZMIJ_USE_U64_LANE_CHAIN && !ZMIJ_OPTIMIZE_SIZE
 // The u64 head as a table: for g in [0, 1845), its digits without leading
 // zeros, left-aligned in four bytes. What follows the digits is dead, the
 // body store covers it. 7380 bytes.
 struct top4_table {
-  char e[1845][4];
-};
-constexpr auto make_top4() -> top4_table {
-  top4_table t{};
-  for (int v = 0; v < 1845; ++v) {
-    int n = v;
-    while (n != 0 && n < 1000) n *= 10;  // left-align to four digits
-    for (int i = 3; i >= 0; --i, n /= 10) t.e[v][i] = char('0' + n % 10);
+  char e[1845][4] = {};
+  constexpr top4_table() {
+    for (int v = 0; v < 1845; ++v) {
+      int n = v;
+      while (n != 0 && n < 1000) n *= 10;  // left-align to four digits
+      for (int i = 3; i >= 0; --i, n /= 10) e[v][i] = char('0' + n % 10);
+    }
   }
-  return t;
-}
-#endif
-#if ZMIJ_USE_U64_LANE_CHAIN && ZMIJ_OPTIMIZE_SIZE
+};
 struct head4_tables {
   // Per count c, 10^(20-c) -- the scale that left-aligns the head to four
   // digits: head * scale < 10000 for every count, and the head is zero below
@@ -234,8 +229,6 @@ struct head4_tables {
     }
   }
 };
-#endif
-#if ZMIJ_USE_U64_LANE_CHAIN
 struct u64_lane_tables {
   uint128 k1e4 = {10000, 10000};  // 10^4 in each qword lane's low dword
   // ceil(2^90 / 1e8), a memory operand for both splits: x * it has x / 1e8
@@ -259,7 +252,6 @@ struct u64_lane_tables {
     }
   }
 };
-#endif
 
 // count_digits tables. The index is the RAW output of the leading-zero
 // instruction so no fixup is ever emitted: with LZCNT (or ARM's clz) that is
@@ -350,7 +342,6 @@ struct count_digits_tables {
   }
 };
 
-#if ZMIJ_USE_NEON
 // The NEON layout stores only rows 10..64: the index -- a leading-zero count
 // of a value below 2^54 (or 64 for zero) -- never goes below 10, and the
 // entry load wants byte offset index * 8 straight off the pinned data
@@ -372,7 +363,6 @@ struct inc_lt1e16_rows {
     rows[64 - 10] = uint64_t(1) << 54;
   }
 };
-#endif  // ZMIJ_USE_NEON
 
 struct data {
   static constexpr auto splat64(uint64_t x) -> uint128 { return {x, x}; }
@@ -533,7 +523,7 @@ struct data {
 #  if ZMIJ_OPTIMIZE_SIZE
   head4_tables head4;
 #  else
-  top4_table top4 = make_top4();
+  top4_table top4;
 #  endif
 #endif
 };
