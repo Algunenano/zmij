@@ -497,8 +497,8 @@ struct data {
 #endif    // ZMIJ_USE_SSE4_1
 
 #if ZMIJ_USE_NEON
-  // Post-shuffle bias for itoa_i32, row-selected by neg: negatives get '-'
-  // on byte 0 (which holds a padded BCD leading zero after the widened
+  // Post-shuffle bias for signed 32-bit values, row-selected by neg: negatives
+  // get '-' on byte 0 (which holds a padded BCD leading zero after the widened
   // shuffle window) and '0' on the digits. Two 16-byte rows rather than a
   // 17-byte sliding pair so the row address is neg << 4 off the base and the
   // struct offset folds into the load's scaled immediate.
@@ -829,23 +829,6 @@ ZMIJ_INLINE auto itoa_body(char* out, uint64_t value, uint64_t len,
 ZMIJ_INLINE auto itoa_body10(char* out, uint32_t value, uint64_t len,
                              const data& d) noexcept -> char* {
   return itoa_body(out, uint64_t(value), len, d);
-}
-
-// Signed 32-bit body folding the '-' into the single 16-byte store: the
-// shuffle window is widened by one for negatives (byte 0 then holds a padded
-// BCD leading zero), and the post-shuffle bias -- sign_bias at offset
-// 1 - neg -- turns that zero into '-' while biasing the digits with '0'.
-ZMIJ_INLINE auto itoa_i32(char* out, int32_t value, const data& d) noexcept
-    -> char* {
-  uint32_t mag = value >= 0 ? uint32_t(value) : -uint32_t(value);
-  uint64_t neg = value < 0;
-  uint64_t chars = count_digits(mag, d) + neg;
-  uint8x16_t shuffle = vld1q_u8(d.revalign_shuffle + (16 - chars));
-  uint8x16_t bias = vld1q_u8(d.sign_bias[neg]);
-  vst1q_u8(
-      reinterpret_cast<uint8_t*>(out),
-      vaddq_u8(vqtbl1q_u8(to_unshuffled_digits_itoa(mag, d), shuffle), bias));
-  return out + chars;
 }
 
 // Writes exactly 16 ASCII digits of `value` in [0, 1e16) at `out`, zero-padded,
@@ -1349,14 +1332,25 @@ ZMIJ_INLINE auto itoa_signed(char* out, Int value) noexcept -> char* {
   }
 #endif
   using uint = std::conditional_t<sizeof(Int) <= 4, uint32_t, uint64_t>;
+  uint mag = value >= 0 ? uint(value) : -uint(value);
 #if ZMIJ_USE_NEON
   if (sizeof(Int) <= 4) {
+    // Fold the '-' into the single 16-byte store: the shuffle window is
+    // widened by one for negatives (byte 0 then holds a padded BCD leading
+    // zero), and adding sign_bias[neg] after the shuffle turns that zero into
+    // '-' while biasing the digits with '0'.
     const auto* d = &static_data;
     ZMIJ_ASM(("" : "+r"(d)));  // Load constants from memory.
-    return itoa_i32(out, int32_t(value), *d);
+    uint64_t neg = value < 0;
+    uint64_t chars = count_digits(mag, *d) + neg;
+    uint8x16_t shuffle = vld1q_u8(d->revalign_shuffle + (16 - chars));
+    uint8x16_t bias = vld1q_u8(d->sign_bias[neg]);
+    vst1q_u8(reinterpret_cast<uint8_t*>(out),
+             vaddq_u8(vqtbl1q_u8(to_unshuffled_digits_itoa(mag, *d), shuffle),
+                      bias));
+    return out + chars;
   }
-#endif
-  uint mag = value >= 0 ? uint(value) : -uint(value);
+#endif  // ZMIJ_USE_NEON
   *out = '-';
   out += value < 0;
   return itoa(out, mag);
