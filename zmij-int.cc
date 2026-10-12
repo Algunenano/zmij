@@ -814,8 +814,8 @@ ZMIJ_INLINE auto to_ascii16_and_shuffle(uint64_t value, uint8x16_t shuffle,
 // fused 32-bit counter).
 // Mirrors the SSE4.1 itoa_body, folding the BCD reversal and leading-zero drop
 // into one vqtbl1q_u8.
-ZMIJ_INLINE char* itoa_body(char* out, uint64_t value, uint64_t len,
-                            const data& d) noexcept {
+ZMIJ_INLINE auto itoa_body(char* out, uint64_t value, uint64_t len,
+                           const data& d) noexcept -> char* {
   uint64_t leading_zeroes = 16 - len;
   uint8x16_t shuffle = vld1q_u8(d.revalign_shuffle + leading_zeroes);
   vst1q_u8(reinterpret_cast<uint8_t*>(out),
@@ -826,8 +826,8 @@ ZMIJ_INLINE char* itoa_body(char* out, uint64_t value, uint64_t len,
 // No narrow 32-bit kernel on NEON (the SSE4.1 SWAR-pack diet measured
 // exact instruction-count and time parity with this route on the M5); the
 // 32-bit entry forwards to the 16-digit body.
-ZMIJ_INLINE char* itoa_body10(char* out, uint32_t value, uint64_t len,
-                              const data& d) noexcept {
+ZMIJ_INLINE auto itoa_body10(char* out, uint32_t value, uint64_t len,
+                             const data& d) noexcept -> char* {
   return itoa_body(out, uint64_t(value), len, d);
 }
 
@@ -835,7 +835,8 @@ ZMIJ_INLINE char* itoa_body10(char* out, uint32_t value, uint64_t len,
 // shuffle window is widened by one for negatives (byte 0 then holds a padded
 // BCD leading zero), and the post-shuffle bias -- sign_bias at offset
 // 1 - neg -- turns that zero into '-' while biasing the digits with '0'.
-ZMIJ_INLINE char* itoa_i32(char* out, int32_t value, const data& d) noexcept {
+ZMIJ_INLINE auto itoa_i32(char* out, int32_t value, const data& d) noexcept
+    -> char* {
   uint32_t mag = value >= 0 ? uint32_t(value) : -uint32_t(value);
   uint64_t neg = value < 0;
   uint64_t chars = count_digits(mag, d) + neg;
@@ -884,9 +885,10 @@ ZMIJ_INLINE auto to_ascii16_and_shuffle(uint64_t value, const __m128i& shuffle,
 
 // Unused where the u64 path is the lane chain and the u128 paths use
 // itoa_body_head16_pad / itoa_top8.
-[[ZMIJ_MAYBE_UNUSED]] ZMIJ_INLINE char* itoa_body(char* out, uint64_t value,
-                                                  uint64_t len,
-                                                  const data& d) noexcept {
+[[ZMIJ_MAYBE_UNUSED]] ZMIJ_INLINE auto itoa_body(char* out, uint64_t value,
+                                                 uint64_t len,
+                                                 const data& d) noexcept
+    -> char* {
   uint64_t leading_zeroes = 16 - len;
   __m128i shuffle = _mm_loadu_si128(
       reinterpret_cast<const __m128i*>(d.revalign_shuffle + leading_zeroes));
@@ -896,8 +898,8 @@ ZMIJ_INLINE auto to_ascii16_and_shuffle(uint64_t value, const __m128i& shuffle,
   return out + len;
 }
 
-ZMIJ_INLINE char* itoa_body10(char* out, uint32_t value, uint64_t len,
-                              const data& d) noexcept {
+ZMIJ_INLINE auto itoa_body10(char* out, uint32_t value, uint64_t len,
+                             const data& d) noexcept -> char* {
   __m128i shuffle = _mm_loadu_si128(m128ptr(d.revalign_shuffle10 + (10 - len)));
   uint32_t high8 = value / 100;
   uint32_t top4 = value / 1'000'000;
@@ -982,8 +984,9 @@ static void itoa_body32_pad(char* out, uint64_t mid, uint64_t low,
 // reverse+trim revalign shuffle, lane1 the plain reversal. The two 16-byte
 // lanes are stored to separate addresses (offset by hlen), so the digits
 // concatenate without any lane-crossing shuffle. Returns out + hlen + 16.
-ZMIJ_INLINE char* itoa_body_head16_pad(char* out, uint64_t head, uint64_t hlen,
-                                       uint64_t tail, const data& d) noexcept {
+ZMIJ_INLINE auto itoa_body_head16_pad(char* out, uint64_t head, uint64_t hlen,
+                                      uint64_t tail, const data& d) noexcept
+    -> char* {
   __m256i ascii_bcd =
       to_ascii16x2_256(head, tail, d);  // lane0=head, lane1=tail
   // lane0 (head): sliding window at offset lz = 16 - hlen; lane1 (tail): the
@@ -1027,8 +1030,8 @@ ZMIJ_INLINE void itoa_body16_pad(char* dst, uint64_t value,
 // Convert value in [0, 1e16) to ASCII digits, write left-aligned at out.
 // Returns the past-the-end pointer, out + len. `len` is the digit count of
 // `value`, which the caller supplies.
-ZMIJ_INLINE char* itoa_body(char* out, uint64_t value, uint64_t len,
-                            const data& d) noexcept {
+ZMIJ_INLINE auto itoa_body(char* out, uint64_t value, uint64_t len,
+                           const data& d) noexcept -> char* {
   // Scale by 10^(16 - len) so the MSD lands in the top digit of the field:
   // the kernel's output is left-aligned in the register and the XMM stores
   // directly -- no GPR extraction and no 128-bit shift. The kernel now waits
@@ -1045,7 +1048,8 @@ ZMIJ_INLINE char* itoa_body(char* out, uint64_t value, uint64_t len,
 // bytes past len. Cheaper than the 16-digit kernel, whose scaled form would
 // wait on the digit count at the end of the two-divmod u128 chain. Mirrors
 // the scalar u32 path's high-group store.
-ZMIJ_INLINE char* itoa_head7(char* out, uint32_t top, uint64_t len) noexcept {
+ZMIJ_INLINE auto itoa_head7(char* out, uint32_t top, uint64_t len) noexcept
+    -> char* {
   uint64_t bcd = to_bcd8(top) + zeros;
   uint64_t sh = 8 * (8 - len);
   uint64_t aligned = is_big_endian ? bcd << sh : bcd >> sh;
@@ -1077,8 +1081,8 @@ void itoa_body32_pad(char* out, uint64_t mid, uint64_t low,
 // block split to two digits by one SWAR /10 (the same mul/shift the scalar
 // paths use), left-trimmed to `len` significant digits and stored. No LUT, no
 // memcpy, one store.
-ZMIJ_INLINE char* itoa_top8(char* out, uint32_t top, uint64_t len,
-                            const data& d) noexcept {
+ZMIJ_INLINE auto itoa_top8(char* out, uint32_t top, uint64_t len,
+                           const data& d) noexcept -> char* {
   // top < 1e7 < 2^24, so top and every floor(top / 10^k) are exact in f32 and
   // the naive reciprocals truncate correctly -- no shift, no fold needed here.
   __m128 x = _mm_cvtepi32_ps(_mm_set1_epi32(int(top)));
