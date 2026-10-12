@@ -14,7 +14,7 @@
 #include <stdint.h>  // uint64_t
 #include <string.h>  // memcpy
 
-#include <type_traits>  // std::make_unsigned, std::conditional_t
+#include <type_traits>  // std::conditional_t
 
 #include "zmij.h"
 
@@ -1204,19 +1204,6 @@ ZMIJ_INLINE auto itoa_u128(char* out, uint128_t value) noexcept -> char* {
 }
 #endif  // ZMIJ_USE_INT128
 
-// std::make_unsigned is ill-formed for __int128 in strict-conformance mode
-// (it's not a standard integer type), so map it here. The specialization sits
-// behind ZMIJ_USE_INT128, which is 0 on toolchains without __int128 (e.g.
-// MSVC), so the primary template handles 32/64-bit there.
-template <typename Int> struct itoa_make_unsigned {
-  using type = typename std::make_unsigned<Int>::type;
-};
-#if ZMIJ_USE_INT128
-template <> struct itoa_make_unsigned<__int128> {
-  using type = unsigned __int128;
-};
-#endif
-
 }  // namespace
 
 // Writes the decimal representation of unsigned value to out. Minimum buffer
@@ -1351,14 +1338,13 @@ ZMIJ_INLINE auto itoa_signed(char* out, Int value) noexcept -> char* {
   if (sizeof(Int) > 8) {
     if (value == Int(int64_t(value))) [[ZMIJ_LIKELY]]
       return itoa_signed(out, int64_t(value));
-    using UInt = typename itoa_make_unsigned<Int>::type;
-    UInt mag = value < 0 ? -UInt(value) : UInt(value);
+    uint128_t mag = value < 0 ? -uint128_t(value) : uint128_t(value);
     *out = '-';
     out += value < 0;
     return itoa_u128_wide(out, mag);
   }
 #endif
-  using UInt = typename itoa_make_unsigned<Int>::type;
+  using UInt = std::conditional_t<sizeof(Int) <= 4, uint32_t, uint64_t>;
 #if ZMIJ_USE_NEON
   if (sizeof(Int) <= 4) {
     const auto* d = &static_data;
