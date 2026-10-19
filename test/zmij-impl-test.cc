@@ -375,6 +375,7 @@ TEST(zmij_impl_test, shortest_big_double) {
   }
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 TEST(zmij_impl_test, write_big_allocation_failure) {
   // write_big allocates only for a long double wider than double.
   if (std::numeric_limits<long double>::digits <=
@@ -399,3 +400,4 @@ TEST(zmij_impl_test, write_big_allocation_failure) {
   // The same call succeeds once allocation works again.
   EXPECT_NE(zmij::write_scientific(buf, sizeof(buf), value, 30), nullptr);
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE

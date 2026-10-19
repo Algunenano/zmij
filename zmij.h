@@ -38,12 +38,12 @@
 #else
 #  define ZMIJ_HAS_BUILTIN(x) 0
 #endif
-// IBM double-double (the ppc64le default) is not IEEE 754, so format it through
-// the double path, the same as when long double is double.
-#if LDBL_MANT_DIG == DBL_MANT_DIG || defined(__LONG_DOUBLE_IBM128__)
-#  define ZMIJ_LDBL_AS_DOUBLE 1
+// IBM double-double, the ppc64le default long double, is not IEEE 754, so the
+// long double API is not provided for it.
+#ifdef __LONG_DOUBLE_IBM128__
+#  define ZMIJ_USE_LONG_DOUBLE 0
 #else
-#  define ZMIJ_LDBL_AS_DOUBLE 0
+#  define ZMIJ_USE_LONG_DOUBLE 1
 #endif
 #ifdef __has_attribute
 #  define ZMIJ_HAS_ATTRIBUTE(x) __has_attribute(x)
@@ -706,7 +706,7 @@ auto write_hex(char* out, size_t n, Float value, int precision,
 
 // When long double == double it has no explicit instantiations, so forward the
 // long double detail writers to their double counterparts.
-#if ZMIJ_LDBL_AS_DOUBLE
+#if LDBL_MANT_DIG == DBL_MANT_DIG
 // There is no write_big for double, so route shortest through write.
 template <>
 inline auto write_big(char* out, size_t n, long double value) noexcept
@@ -731,7 +731,7 @@ inline auto write_hex(char* out, size_t n, long double value, int precision,
                       bool prefix) noexcept -> size_t {
   return write_hex(out, n, double(value), precision, prefix);
 }
-#endif  // ZMIJ_LDBL_AS_DOUBLE
+#endif  // LDBL_MANT_DIG == DBL_MANT_DIG
 
 // Returns the past-the-end pointer after writing min(size, n) chars to `out`.
 inline auto clamp_end(char* out, size_t size, size_t n) noexcept -> char* {
@@ -768,15 +768,17 @@ inline auto to_decimal(float value) noexcept -> dec_fp<> {
 inline auto to_decimal(double value) noexcept -> dec_fp<> {
   return detail::to_decimal(value);
 }
+#if ZMIJ_USE_LONG_DOUBLE
 inline auto to_decimal(long double value) noexcept
     -> dec_fp<detail::uint128_t> {
-#if ZMIJ_LDBL_AS_DOUBLE
+#if LDBL_MANT_DIG == DBL_MANT_DIG
   dec_fp<> dec = detail::to_decimal(double(value));
   return {dec.sig, dec.exp, dec.negative};
 #else
   return detail::to_decimal_big(value);
 #endif
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 /// Buffer sizes for the write* functions, usable in generic code as
 /// buffer_sizes<Float>::shortest, ::scientific, ::fixed, and ::hex.
@@ -799,12 +801,14 @@ template <> struct buffer_sizes<double> {
 // long double: `scientific` is sized to round-trip: precision 35 (scientific)
 // or 36 (general). `fixed` is omitted as it would need an impractical buffer,
 // so callers must size fixed output themselves.
+#if ZMIJ_USE_LONG_DOUBLE
 template <> struct buffer_sizes<long double> {
   static constexpr size_t shortest = long_double_buffer_size;  // write
   static constexpr size_t scientific = 44;  // write_scientific (and general)
   // Worst case is IEEE binary128: 1 sign + "0x1." + 28 digits + "p+16383".
   static constexpr size_t hex = 40;  // write_hex
 };
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 /// Writes the shortest correctly rounded decimal representation of `value` to
 /// `out`, without a null terminator.
@@ -835,10 +839,12 @@ inline ZMIJ_CONSTEXPR20 auto write(char* out, size_t n, float value) noexcept
   return detail::copy_clamped(out, n, buffer, detail::write(buffer, value));
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 inline auto write(char* out, size_t n, long double value) noexcept -> char* {
-  if (ZMIJ_LDBL_AS_DOUBLE) return write(out, n, double(value));
+  if (LDBL_MANT_DIG == DBL_MANT_DIG) return write(out, n, double(value));
   return detail::clamp_end(out, detail::write_big(out, n, value), n);
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 /// Writes the decimal representation of `value` to `out` without a null
 /// terminator. Returns a pointer past the last character written; if the
@@ -934,6 +940,7 @@ inline auto write_scientific(char* out, size_t n, float value,
       out, n, buffer, detail::write_scientific(buffer, value, precision + 1));
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 inline auto write_scientific(char* out, size_t n, long double value,
                              int precision) noexcept -> char* {
   if (double(value) == value)
@@ -942,6 +949,7 @@ inline auto write_scientific(char* out, size_t n, long double value,
   auto size = detail::write_big(out, n, value, precision, format::scientific);
   return size != 0 ? detail::clamp_end(out, size, n) : nullptr;
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 /// Writes `value` in general format with up to `precision` significant digits
 /// and no trailing zeros (e.g. 1.5 or 1.5e+20) to `out`, without a null
@@ -978,6 +986,7 @@ inline auto write_general(char* out, size_t n, float value,
                               detail::write_general(buffer, value, precision));
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 inline auto write_general(char* out, size_t n, long double value,
                           int precision) noexcept -> char* {
   if (double(value) == value)
@@ -986,6 +995,7 @@ inline auto write_general(char* out, size_t n, long double value,
   auto size = detail::write_big(out, n, value, precision, format::general);
   return size != 0 ? detail::clamp_end(out, size, n) : nullptr;
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 /// Writes `value` in fixed notation with exactly `precision` digits after the
 /// decimal point (e.g. 1.500) to `out`, without a null terminator. The result
@@ -1021,6 +1031,7 @@ inline auto write_fixed(char* out, size_t n, float value,
                               detail::write_fixed(buffer, value, precision));
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 inline auto write_fixed(char* out, size_t n, long double value,
                         int precision) noexcept -> char* {
   if (double(value) == value)
@@ -1029,6 +1040,7 @@ inline auto write_fixed(char* out, size_t n, long double value,
   auto size = detail::write_big(out, n, value, precision, format::fixed);
   return size != 0 ? detail::clamp_end(out, size, n) : nullptr;
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 /// Writes `value` in hexadecimal floating-point notation (like printf's %a) in
 /// its shortest form (e.g. -0x1.8p+1) to `out`, without a null terminator.
@@ -1045,12 +1057,14 @@ inline auto write_hex(char* out, size_t n, float value) noexcept -> char* {
   return write_hex(out, n, double(value));
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 inline auto write_hex(char* out, size_t n, long double value) noexcept
     -> char* {
   char buffer[buffer_sizes<long double>::hex];
   if (n >= sizeof(buffer)) return detail::write_hex(out, value);
   return detail::copy_clamped(out, n, buffer, detail::write_hex(buffer, value));
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 }  // namespace zmij
 

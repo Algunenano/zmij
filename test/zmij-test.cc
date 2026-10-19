@@ -806,6 +806,7 @@ TEST(double_test, write_big_reports_true_length) {
   EXPECT_EQ(needed, expected);                // true length, > capacity
 }
 
+#if ZMIJ_USE_LONG_DOUBLE
 TEST(long_double_test, to_decimal) {
   using limits = std::numeric_limits<long double>;
 
@@ -925,7 +926,7 @@ TEST(long_double_test, to_chars) {
         << "value=" << double(value);
   }
 
-  if (!ZMIJ_LDBL_AS_DOUBLE) {
+  if (LDBL_MANT_DIG != DBL_MANT_DIG) {
     // An extended value drives write_big (shortest) not the double path.
     long double extended = 1.0L + 0x1p-63L;
     auto r = zmij::to_chars(buf, buf + sizeof(buf), extended);
@@ -995,7 +996,7 @@ TEST(long_double_test, to_chars_format) {
   EXPECT_EQ(shortest(zmij::chars_format::general, 100.0L), "1e+02");
   EXPECT_EQ(shortest(zmij::chars_format::general, 1234567.0L), "1234567");
 
-  if (!ZMIJ_LDBL_AS_DOUBLE) {
+  if (LDBL_MANT_DIG != DBL_MANT_DIG) {
     // An extended value drives to_decimal_big; each format must round-trip.
     long double extended = 1.0L + 0x1p-63L;
     for (zmij::chars_format f :
@@ -1033,7 +1034,7 @@ static int count_sig_digits(const std::string& s) {
 // as double, so it drives write_big (shortest) rather than the double fast
 // path.
 TEST(long_double_test, write_shortest) {
-  if (ZMIJ_LDBL_AS_DOUBLE)
+  if (LDBL_MANT_DIG == DBL_MANT_DIG)
     GTEST_SKIP() << "long double is double; no extended path";
   auto check = [](long double value) {
     char buf[zmij::long_double_buffer_size + 1];
@@ -1102,6 +1103,7 @@ TEST(long_double_test, write_shortest) {
     check(-misround);
   }
 }
+#endif  // ZMIJ_USE_LONG_DOUBLE
 
 #endif  // !ZMIJ_C
 
@@ -1199,7 +1201,7 @@ TEST(double_test, write_hex_no_buffer) {
   EXPECT_EQ(std::string(buf, end), "-0x1");
 }
 
-#if !ZMIJ_C
+#if !ZMIJ_C && ZMIJ_USE_LONG_DOUBLE
 // Double-exact values so the expected output is the same whether long double
 // is x87 80-bit, IEEE binary128, or plain double. This is not compared against
 // snprintf's %La: glibc's 80-bit %La uses a non-leading-1 form (e.g. "0xcp-3"
@@ -1213,7 +1215,7 @@ TEST(long_double_test, write_hex) {
   EXPECT_EQ(to_hex(3.25L), "0x1.ap+1");
 }
 
-#endif  // !ZMIJ_C
+#endif  // !ZMIJ_C && ZMIJ_USE_LONG_DOUBLE
 
 auto main(int argc, char** argv) -> int {
   testing::InitGoogleTest(&argc, argv);
